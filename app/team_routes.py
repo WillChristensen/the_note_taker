@@ -5,8 +5,15 @@ from sqlalchemy.orm import Session
 
 from app.auth_dependencies import get_current_user
 from app.database import get_db
-from app.models import Membership, Team, TeamRole, User
-from app.schemas import MemberAdd, MemberRead, TeamCreate, TeamRead
+from app.models import Membership, Note, Team, TeamRole, User
+from app.schemas import (
+    MemberAdd,
+    MemberRead,
+    NoteCreate,
+    NoteRead,
+    TeamCreate,
+    TeamRead,
+)
 
 router = APIRouter(prefix="/teams", tags=["teams"])
 
@@ -51,6 +58,50 @@ def list_teams(
         .order_by(Team.created_at.desc(), Team.id.desc())
     )
     return list(db.scalars(statement).all())
+
+
+@router.post(
+    "/{team_id}/notes",
+    response_model=NoteRead,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_note(
+        team_id: int,
+        note_data: NoteCreate,
+        current_user: User = Depends(get_current_user),
+        db: Session = Depends(get_db),
+) -> Note:
+    team = db.scalar(
+        select(Team).where(Team.id == team_id, Team.deleted_at.is_(None))
+    )
+    if team is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Team not found",
+        )
+
+    membership_exists = db.scalar(
+        select(Membership.id).where(
+            Membership.team_id == team_id,
+            Membership.user_id == current_user.id,
+        )
+    )
+    if membership_exists is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Team membership required",
+        )
+
+    note = Note(
+        team_id=team_id,
+        author_id=current_user.id,
+        title=note_data.title,
+        content=note_data.content,
+    )
+    db.add(note)
+    db.commit()
+    db.refresh(note)
+    return note
 
 
 def require_active_owner(

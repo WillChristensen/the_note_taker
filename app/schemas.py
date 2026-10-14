@@ -66,3 +66,28 @@ class MemberRead(BaseModel):
     email: EmailStr
     role: str
     joined_at: datetime
+
+
+class NoteCreate(BaseModel):
+    title: str = Field(min_length=1, max_length=200)
+    content: str = Field(min_length=1)
+
+    @field_validator("title")
+    @classmethod
+    def strip_title(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("Note title must not be blank")
+        return normalized
+
+
+class NoteRead(BaseModel):
+    id: int
+    team_id: int
+    author_id: int
+    title: str
+    content: str
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}

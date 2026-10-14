@@ -7,7 +7,7 @@ from sqlalchemy.orm import sessionmaker
 
 from app.database import Base, create_database_engine, get_db
 from app.main import app
-from app.models import Membership, Team, TeamRole, User
+from app.models import Membership, Note, Team, TeamRole, User
 
 AUTH_SECRET = "test-only-secret-key-with-at-least-32-chars"
 PASSWORD = "a secure password"
@@ -307,3 +307,135 @@ def test_deleted_team_cannot_list_or_add_members(team_client) -> None:
 
     assert list_response.status_code == 404
     assert add_response.status_code == 404
+
+
+def test_team_member_can_create_note_and_author_is_authenticated_user(team_client) -> None:
+    client, session_factory = team_client
+    owner_token = register_and_login(client, "owner@example.com")
+    member_token = register_and_login(client, "member@example.com")
+    team_id = client.post(
+        "/teams",
+        json={"name": "Notes team"},
+        headers={"Authorization": f"Bearer {owner_token}"},
+    ).json()["id"]
+    added_member = client.post(
+        f"/teams/{team_id}/members",
+        json={"email": "member@example.com"},
+        headers={"Authorization": f"Bearer {owner_token}"},
+    )
+    assert added_member.status_code == 201
+
+    response = client.post(
+        f"/teams/{team_id}/notes",
+        json={
+            "title": "  Meeting notes  ",
+            "content": "Discussed the launch plan.",
+            "author_id": 1,
+        },
+        headers={"Authorization": f"Bearer {member_token}"},
+    )
+
+    assert response.status_code == 201
+    body = response.json()
+    assert body["team_id"] == team_id
+    assert body["author_id"] == 2
+    assert body["title"] == "Meeting notes"
+    assert body["content"] == "Discussed the launch plan."
+    assert body["id"] > 0
+    assert body["created_at"]
+    assert body["updated_at"]
+
+    with session_factory() as session:
+        stored_note = session.get(Note, body["id"])
+        assert stored_note is not None
+        assert stored_note.author_id == 2
+
+
+def test_non_member_cannot_create_team_note(team_client) -> None:
+    client, _ = team_client
+    owner_token = register_and_login(client, "owner@example.com")
+    outsider_token = register_and_login(client, "outsider@example.com")
+    team_id = client.post(
+        "/teams",
+        json={"name": "Private team"},
+        headers={"Authorization": f"Bearer {owner_token}"},
+    ).json()["id"]
+
+    response = client.post(
+        f"/teams/{team_id}/notes",
+        json={"title": "Unauthorized note", "content": "Should not be saved"},
+        headers={"Authorization": f"Bearer {outsider_token}"},
+    )
+
+    assert response.status_code == 403
+    assert response.json() == {"detail": "Team membership required"}
+
+
+def test_cannot_create_note_for_missing_or_deleted_team(team_client) -> None:
+    client, session_factory = team_client
+    owner_token = register_and_login(client, "owner@example.com")
+    team_id = client.post(
+        "/teams",
+        json={"name": "Deleted team"},
+        headers={"Authorization": f"Bearer {owner_token}"},
+    ).json()["id"]
+    with session_factory() as session:
+        team = session.get(Team, team_id)
+        assert team is not None
+        team.deleted_at = datetime.now(UTC)
+        session.commit()
+
+    headers = {"Authorization": f"Bearer {owner_token}"}
+    deleted_team_response = client.post(
+        f"/teams/{team_id}/notes",
+        json={"title": "Note", "content": "Content"},
+        headers=headers,
+    )
+    missing_team_response = client.post(
+        "/teams/9999/notes",
+        json={"title": "Note", "content": "Content"},
+        headers=headers,
+    )
+
+    assert deleted_team_response.status_code == 404
+    assert missing_team_response.status_code == 404
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"title": "", "content": "Content"},
+        {"title": "   ", "content": "Content"},
+        {"title": "x" * 201, "content": "Content"},
+        {"title": "Title", "content": ""},
+        {"content": "Content"},
+    ],
+)
+def test_create_note_rejects_invalid_input(team_client, payload) -> None:
+    client, _ = team_client
+    owner_token = register_and_login(client, "owner@example.com")
+    team_id = client.post(
+        "/teams",
+        json={"name": "Notes team"},
+        headers={"Authorization": f"Bearer {owner_token}"},
+    ).json()["id"]
+
+    response = client.post(
+        f"/teams/{team_id}/notes",
+        json=payload,
+        headers={"Authorization": f"Bearer {owner_token}"},
+    )
+
+    assert response.status_code == 422
+
+
+def test_create_note_requires_authentication(team_client) -> None:
+    client, _ = team_client
+
+    response = client.post(
+        "/teams/1/notes",
+        json={"title": "Note", "content": "Content"},
+    )
+
+    assert response.status_code == 401
+    assert response.headers["www-authenticate"] == "Bearer"

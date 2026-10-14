@@ -2,7 +2,8 @@
 
 A REST API foundation for capturing and sharing notes with small teams. The
 current API supports health checks, registration, login, team creation and
-listing, and owner-managed team memberships. Note CRUD is not implemented yet.
+listing, owner-managed team memberships, and note creation. Note listing,
+retrieval, updates, and deletion are not implemented yet.
 
 ## Requirements
 
@@ -75,6 +76,7 @@ export ACCESS_TOKEN='paste-access-token-here'
 | `GET` | `/teams` | Authenticated | List active teams the caller belongs to |
 | `GET` | `/teams/{team_id}/members` | Team owner | List active members of a team |
 | `POST` | `/teams/{team_id}/members` | Team owner | Add an existing active user by email as a member |
+| `POST` | `/teams/{team_id}/notes` | Team member | Create a note in an active team |
 
 Example team and membership requests:
 
@@ -94,7 +96,16 @@ curl -X POST http://127.0.0.1:8000/teams/1/members \
 
 curl http://127.0.0.1:8000/teams/1/members \
   -H "Authorization: Bearer $ACCESS_TOKEN"
+
+curl -X POST http://127.0.0.1:8000/teams/1/notes \
+  -H "Authorization: Bearer $ACCESS_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"title":"Planning","content":"Discuss launch timeline."}'
 ```
+
+Note authorship is always taken from the access token, not request data. Only
+active team members can create notes; non-members receive `403 Forbidden`, and
+missing or soft-deleted teams receive `404 Not Found`.
 
 Registration returns `409 Conflict` for an existing email; malformed input
 returns `422 Unprocessable Entity`. Invalid login/token requests return
@@ -116,10 +127,11 @@ returns `422 Unprocessable Entity`. Invalid login/token requests return
 
 ## If I had more time
 
-I would implement note CRUD with membership checks and pagination, add
-invitation and account-recovery flows, and exercise the migration path against
-PostgreSQL. I would also define an explicit retention/anonymization policy for
-soft-deleted accounts and teams before implementing permanent data purging.
+I would implement note listing, retrieval, updates, and deletion with membership
+checks and pagination; add invitation and account-recovery flows; and exercise
+the migration path against PostgreSQL. I would also define an explicit
+retention/anonymization policy for soft-deleted accounts and teams before
+implementing permanent data purging.
 
 ## Tests
 
