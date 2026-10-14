@@ -439,3 +439,134 @@ def test_create_note_requires_authentication(team_client) -> None:
 
     assert response.status_code == 401
     assert response.headers["www-authenticate"] == "Bearer"
+
+
+def test_team_member_can_list_notes_newest_first_with_pagination(team_client) -> None:
+    client, session_factory = team_client
+    owner_token = register_and_login(client, "owner@example.com")
+    member_token = register_and_login(client, "member@example.com")
+    team_id = client.post(
+        "/teams",
+        json={"name": "Notes team"},
+        headers={"Authorization": f"Bearer {owner_token}"},
+    ).json()["id"]
+    membership = client.post(
+        f"/teams/{team_id}/members",
+        json={"email": "member@example.com"},
+        headers={"Authorization": f"Bearer {owner_token}"},
+    )
+    assert membership.status_code == 201
+    other_team_id = client.post(
+        "/teams",
+        json={"name": "Other team"},
+        headers={"Authorization": f"Bearer {owner_token}"},
+    ).json()["id"]
+
+    note_ids = []
+    for title in ("First", "Second", "Third", "Fourth"):
+        response = client.post(
+            f"/teams/{team_id}/notes",
+            json={"title": title, "content": f"{title} content"},
+            headers={"Authorization": f"Bearer {member_token}"},
+        )
+        assert response.status_code == 201
+        note_ids.append(response.json()["id"])
+    other_note = client.post(
+        f"/teams/{other_team_id}/notes",
+        json={"title": "Other team's note", "content": "Not in this list"},
+        headers={"Authorization": f"Bearer {owner_token}"},
+    )
+    assert other_note.status_code == 201
+
+    same_timestamp = datetime(2026, 1, 1, tzinfo=UTC)
+    with session_factory() as session:
+        for note_id in note_ids:
+            note = session.get(Note, note_id)
+            assert note is not None
+            note.created_at = same_timestamp
+        session.commit()
+
+    response = client.get(
+        f"/teams/{team_id}/notes?limit=2&offset=1",
+        headers={"Authorization": f"Bearer {member_token}"},
+    )
+
+    assert response.status_code == 200
+    assert [note["id"] for note in response.json()] == list(
+        reversed(note_ids)
+    )[1:3]
+    assert all(note["team_id"] == team_id for note in response.json())
+
+    final_page = client.get(
+        f"/teams/{team_id}/notes?limit=2&offset=2",
+        headers={"Authorization": f"Bearer {member_token}"},
+    )
+    assert [note["id"] for note in final_page.json()] == list(
+        reversed(note_ids)
+    )[2:4]
+
+
+@pytest.mark.parametrize(
+    "query",
+    ["?limit=0", "?limit=101", "?offset=-1"],
+)
+def test_list_team_notes_rejects_invalid_pagination(team_client, query: str) -> None:
+    client, _ = team_client
+    owner_token = register_and_login(client, "owner@example.com")
+    team_id = client.post(
+        "/teams",
+        json={"name": "Notes team"},
+        headers={"Authorization": f"Bearer {owner_token}"},
+    ).json()["id"]
+
+    response = client.get(
+        f"/teams/{team_id}/notes{query}",
+        headers={"Authorization": f"Bearer {owner_token}"},
+    )
+
+    assert response.status_code == 422
+
+
+def test_list_team_notes_requires_membership_and_authentication(team_client) -> None:
+    client, _ = team_client
+    owner_token = register_and_login(client, "owner@example.com")
+    outsider_token = register_and_login(client, "outsider@example.com")
+    team_id = client.post(
+        "/teams",
+        json={"name": "Private team"},
+        headers={"Authorization": f"Bearer {owner_token}"},
+    ).json()["id"]
+
+    unauthenticated = client.get(f"/teams/{team_id}/notes")
+    outsider = client.get(
+        f"/teams/{team_id}/notes",
+        headers={"Authorization": f"Bearer {outsider_token}"},
+    )
+
+    assert unauthenticated.status_code == 401
+    assert outsider.status_code == 403
+    assert outsider.json() == {"detail": "Team membership required"}
+
+
+def test_list_team_notes_returns_not_found_for_missing_or_deleted_team(
+        team_client,
+) -> None:
+    client, session_factory = team_client
+    owner_token = register_and_login(client, "owner@example.com")
+    team_id = client.post(
+        "/teams",
+        json={"name": "Deleted team"},
+        headers={"Authorization": f"Bearer {owner_token}"},
+    ).json()["id"]
+    with session_factory() as session:
+        team = session.get(Team, team_id)
+        assert team is not None
+        team.deleted_at = datetime.now(UTC)
+        session.commit()
+
+    headers = {"Authorization": f"Bearer {owner_token}"}
+    deleted_team = client.get(f"/teams/{team_id}/notes", headers=headers)
+    missing_team = client.get("/teams/9999/notes", headers=headers)
+
+    assert deleted_team.status_code == 404
+    assert missing_team.status_code == 404

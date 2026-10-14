@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -102,6 +102,45 @@ def create_note(
     db.commit()
     db.refresh(note)
     return note
+
+
+@router.get("/{team_id}/notes", response_model=list[NoteRead])
+def list_team_notes(
+        team_id: int,
+        limit: int = Query(default=20, ge=1, le=100),
+        offset: int = Query(default=0, ge=0),
+        current_user: User = Depends(get_current_user),
+        db: Session = Depends(get_db),
+) -> list[Note]:
+    team = db.scalar(
+        select(Team).where(Team.id == team_id, Team.deleted_at.is_(None))
+    )
+    if team is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Team not found",
+        )
+
+    membership_exists = db.scalar(
+        select(Membership.id).where(
+            Membership.team_id == team_id,
+            Membership.user_id == current_user.id,
+        )
+    )
+    if membership_exists is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Team membership required",
+        )
+
+    statement = (
+        select(Note)
+        .where(Note.team_id == team_id)
+        .order_by(Note.created_at.desc(), Note.id.desc())
+        .offset(offset)
+        .limit(limit)
+    )
+    return list(db.scalars(statement).all())
 
 
 def require_active_owner(
