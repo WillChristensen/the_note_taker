@@ -12,20 +12,27 @@ yet.
 ## Set up locally
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install --upgrade pip
-python -m pip install -e ".[test]"
+make setup
 ```
+
+## Verify the project
+
+```bash
+make verify
+```
+
+This runs the test suite, including migration upgrade/downgrade checks, then
+applies the latest migration to the configured database.
 
 ## Run the service
 
 ```bash
-uvicorn app.main:app --reload
+make run
 ```
 
-The API is available at <http://127.0.0.1:8000>. Interactive API documentation
-is available at <http://127.0.0.1:8000/docs>.
+This applies pending migrations and starts the development server. The API is
+available at <http://127.0.0.1:8000>; interactive documentation is at
+<http://127.0.0.1:8000/docs>.
 
 ## Database
 
@@ -37,7 +44,7 @@ deletion is represented by a `deleted_at` timestamp, so notes and authorship
 are retained. Apply database schema changes with:
 
 ```bash
-alembic upgrade head
+make db-upgrade
 ```
 
 Set `DATABASE_URL` to target a database other than the default SQLite file.
@@ -68,8 +75,8 @@ Expected response:
 {"status": "ok"}
 ```
 
-## Run tests
+## Run tests only
 
 ```bash
-python -m pytest
+make test
 ```
