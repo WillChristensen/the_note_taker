@@ -1,0 +1,2 @@
+Database schema changes are managed by Alembic. Apply the latest migration with
+`alembic upgrade head`; see the project README for database URL configuration.
