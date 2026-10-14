@@ -694,3 +694,180 @@ def test_retrieve_note_returns_not_found_for_missing_or_deleted_team(
 
     assert deleted_team.status_code == 404
     assert missing_team.status_code == 404
+
+
+def test_team_member_can_update_note_fields_and_updated_at(team_client) -> None:
+    client, _ = team_client
+    owner_token = register_and_login(client, "owner@example.com")
+    member_token = register_and_login(client, "member@example.com")
+    team_id = client.post(
+        "/teams",
+        json={"name": "Notes team"},
+        headers={"Authorization": f"Bearer {owner_token}"},
+    ).json()["id"]
+    membership = client.post(
+        f"/teams/{team_id}/members",
+        json={"email": "member@example.com"},
+        headers={"Authorization": f"Bearer {owner_token}"},
+    )
+    assert membership.status_code == 201
+    note = client.post(
+        f"/teams/{team_id}/notes",
+        json={"title": "Planning", "content": "Initial content"},
+        headers={"Authorization": f"Bearer {owner_token}"},
+    )
+    assert note.status_code == 201
+
+    response = client.patch(
+        f"/teams/{team_id}/notes/{note.json()['id']}",
+        json={"title": "  Updated planning  "},
+        headers={"Authorization": f"Bearer {member_token}"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["title"] == "Updated planning"
+    assert response.json()["content"] == "Initial content"
+    assert response.json()["author_id"] == note.json()["author_id"]
+    assert response.json()["updated_at"] > note.json()["updated_at"]
+
+    content_update = client.patch(
+        f"/teams/{team_id}/notes/{note.json()['id']}",
+        json={"content": "Revised content"},
+        headers={"Authorization": f"Bearer {member_token}"},
+    )
+    assert content_update.status_code == 200
+    assert content_update.json()["title"] == "Updated planning"
+    assert content_update.json()["content"] == "Revised content"
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {},
+        {"title": ""},
+        {"title": "   "},
+        {"title": "x" * 201},
+        {"title": None},
+        {"content": ""},
+        {"content": None},
+    ],
+)
+def test_update_note_rejects_empty_or_invalid_patch(team_client, payload) -> None:
+    client, _ = team_client
+    owner_token = register_and_login(client, "owner@example.com")
+    team_id = client.post(
+        "/teams",
+        json={"name": "Notes team"},
+        headers={"Authorization": f"Bearer {owner_token}"},
+    ).json()["id"]
+    note = client.post(
+        f"/teams/{team_id}/notes",
+        json={"title": "Planning", "content": "Initial content"},
+        headers={"Authorization": f"Bearer {owner_token}"},
+    )
+
+    response = client.patch(
+        f"/teams/{team_id}/notes/{note.json()['id']}",
+        json=payload,
+        headers={"Authorization": f"Bearer {owner_token}"},
+    )
+
+    assert response.status_code == 422
+
+
+def test_non_member_cannot_update_team_note(team_client) -> None:
+    client, _ = team_client
+    owner_token = register_and_login(client, "owner@example.com")
+    outsider_token = register_and_login(client, "outsider@example.com")
+    team_id = client.post(
+        "/teams",
+        json={"name": "Private team"},
+        headers={"Authorization": f"Bearer {owner_token}"},
+    ).json()["id"]
+    note = client.post(
+        f"/teams/{team_id}/notes",
+        json={"title": "Private note", "content": "Members only."},
+        headers={"Authorization": f"Bearer {owner_token}"},
+    )
+
+    response = client.patch(
+        f"/teams/{team_id}/notes/{note.json()['id']}",
+        json={"title": "Unauthorized change"},
+        headers={"Authorization": f"Bearer {outsider_token}"},
+    )
+
+    assert response.status_code == 403
+    assert response.json() == {"detail": "Team membership required"}
+
+
+def test_update_note_is_team_scoped_and_requires_authentication(team_client) -> None:
+    client, _ = team_client
+    owner_token = register_and_login(client, "owner@example.com")
+    first_team_id = client.post(
+        "/teams",
+        json={"name": "First team"},
+        headers={"Authorization": f"Bearer {owner_token}"},
+    ).json()["id"]
+    second_team_id = client.post(
+        "/teams",
+        json={"name": "Second team"},
+        headers={"Authorization": f"Bearer {owner_token}"},
+    ).json()["id"]
+    note = client.post(
+        f"/teams/{second_team_id}/notes",
+        json={"title": "Private to second", "content": "Team-scoped note."},
+        headers={"Authorization": f"Bearer {owner_token}"},
+    )
+
+    wrong_team = client.patch(
+        f"/teams/{first_team_id}/notes/{note.json()['id']}",
+        json={"title": "Should not update"},
+        headers={"Authorization": f"Bearer {owner_token}"},
+    )
+    missing_note = client.patch(
+        f"/teams/{first_team_id}/notes/9999",
+        json={"title": "Missing"},
+        headers={"Authorization": f"Bearer {owner_token}"},
+    )
+    unauthenticated = client.patch(
+        f"/teams/{first_team_id}/notes/{note.json()['id']}",
+        json={"title": "Unauthenticated"},
+    )
+
+    assert wrong_team.status_code == 404
+    assert wrong_team.json() == {"detail": "Note not found"}
+    assert missing_note.status_code == 404
+    assert missing_note.json() == {"detail": "Note not found"}
+    assert unauthenticated.status_code == 401
+
+
+def test_update_note_returns_not_found_for_missing_or_deleted_team(
+        team_client,
+) -> None:
+    client, session_factory = team_client
+    owner_token = register_and_login(client, "owner@example.com")
+    team_id = client.post(
+        "/teams",
+        json={"name": "Deleted team"},
+        headers={"Authorization": f"Bearer {owner_token}"},
+    ).json()["id"]
+    with session_factory() as session:
+        team = session.get(Team, team_id)
+        assert team is not None
+        team.deleted_at = datetime.now(UTC)
+        session.commit()
+
+    headers = {"Authorization": f"Bearer {owner_token}"}
+    deleted_team = client.patch(
+        f"/teams/{team_id}/notes/1",
+        json={"title": "Update"},
+        headers=headers,
+    )
+    missing_team = client.patch(
+        "/teams/9999/notes/1",
+        json={"title": "Update"},
+        headers=headers,
+    )
+
+    assert deleted_team.status_code == 404
+    assert missing_team.status_code == 404

@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel, EmailStr, Field, field_validator
+from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
 
 
 class UserRegistration(BaseModel):
@@ -79,6 +79,29 @@ class NoteCreate(BaseModel):
         if not normalized:
             raise ValueError("Note title must not be blank")
         return normalized
+
+
+class NoteUpdate(BaseModel):
+    title: str | None = Field(default=None, min_length=1, max_length=200)
+    content: str | None = Field(default=None, min_length=1)
+
+    @field_validator("title")
+    @classmethod
+    def strip_title(cls, value: str | None) -> str | None:
+        if value is None:
+            return value
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("Note title must not be blank")
+        return normalized
+
+    @model_validator(mode="after")
+    def validate_patch(self) -> "NoteUpdate":
+        if not self.model_fields_set:
+            raise ValueError("At least one note field must be provided")
+        if any(getattr(self, field) is None for field in self.model_fields_set):
+            raise ValueError("Note fields must not be null")
+        return self
 
 
 class NoteRead(BaseModel):
