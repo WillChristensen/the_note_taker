@@ -1,9 +1,8 @@
 # the_note_taker
 
 A REST API for capturing and sharing notes with small teams. The service
-currently provides a health check and a database schema for users, teams,
-memberships, and notes. API endpoints for these workflows are not implemented
-yet.
+currently provides health and user registration endpoints, backed by a schema
+for users, teams, memberships, and notes.
 
 ## Requirements
 
@@ -62,6 +61,19 @@ export AUTH_SECRET_KEY="$(python -c 'import secrets; print(secrets.token_urlsafe
 Access tokens expire after 30 minutes by default. Set
 `AUTH_ACCESS_TOKEN_EXPIRE_MINUTES` to a positive integer to change the lifetime.
 Do not commit or reuse production secrets in source control.
+
+Register a user with:
+
+```bash
+curl -X POST http://127.0.0.1:8000/auth/register \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"person@example.com","password":"a secure password"}'
+```
+
+The API returns the new user's ID, normalized email, and creation timestamp.
+Passwords must contain 8–128 characters and are stored as Argon2 hashes.
+Registering an email address that is already in use returns `409 Conflict`;
+invalid request data returns `422 Unprocessable Entity`.
 
 ## Health check
 
