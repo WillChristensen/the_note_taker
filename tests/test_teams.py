@@ -1005,3 +1005,68 @@ def test_delete_note_returns_not_found_for_missing_or_deleted_team(
 
     assert deleted_team.status_code == 404
     assert missing_team.status_code == 404
+
+
+def test_note_crud_lifecycle_as_team_member(team_client) -> None:
+    client, _ = team_client
+    token = register_and_login(client, "owner@example.com")
+    headers = {"Authorization": f"Bearer {token}"}
+    team_response = client.post(
+        "/teams",
+        json={"name": "CRUD lifecycle team"},
+        headers=headers,
+    )
+    assert team_response.status_code == 201
+    team_id = team_response.json()["id"]
+
+    created = client.post(
+        f"/teams/{team_id}/notes",
+        json={"title": "Initial title", "content": "Initial content"},
+        headers=headers,
+    )
+    assert created.status_code == 201
+    note_id = created.json()["id"]
+    assert created.json()["team_id"] == team_id
+
+    listed = client.get(f"/teams/{team_id}/notes", headers=headers)
+    assert listed.status_code == 200
+    assert [note["id"] for note in listed.json()] == [note_id]
+
+    retrieved = client.get(
+        f"/teams/{team_id}/notes/{note_id}",
+        headers=headers,
+    )
+    assert retrieved.status_code == 200
+    assert retrieved.json() == created.json()
+
+    updated = client.patch(
+        f"/teams/{team_id}/notes/{note_id}",
+        json={"title": "Updated title", "content": "Updated content"},
+        headers=headers,
+    )
+    assert updated.status_code == 200
+    assert updated.json()["title"] == "Updated title"
+    assert updated.json()["content"] == "Updated content"
+    assert updated.json()["author_id"] == created.json()["author_id"]
+    assert updated.json()["updated_at"] > created.json()["updated_at"]
+
+    deleted = client.delete(
+        f"/teams/{team_id}/notes/{note_id}",
+        headers=headers,
+    )
+    assert deleted.status_code == 204
+    assert deleted.content == b""
+
+    listed_after_delete = client.get(f"/teams/{team_id}/notes", headers=headers)
+    retrieved_after_delete = client.get(
+        f"/teams/{team_id}/notes/{note_id}",
+        headers=headers,
+    )
+    deleted_again = client.delete(
+        f"/teams/{team_id}/notes/{note_id}",
+        headers=headers,
+    )
+    assert listed_after_delete.status_code == 200
+    assert listed_after_delete.json() == []
+    assert retrieved_after_delete.status_code == 404
+    assert deleted_again.status_code == 404

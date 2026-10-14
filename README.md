@@ -189,4 +189,5 @@ make test
 ```
 
 Tests use isolated temporary SQLite databases and cover authentication,
-authorization, model constraints, and migration upgrade/downgrade behavior.
+authorization, note CRUD lifecycle and team scoping, pagination, model
+constraints, and migration upgrade/downgrade behavior.
