@@ -82,41 +82,58 @@ export ACCESS_TOKEN='paste-access-token-here'
 | `PATCH` | `/teams/{team_id}/notes/{note_id}` | Team member | Update a note's title and/or content |
 | `DELETE` | `/teams/{team_id}/notes/{note_id}` | Team member | Permanently delete a note |
 
-Example team and membership requests:
+### Notes API
+
+Every note belongs to one team and has a server-assigned author, ID, creation
+time, and update time. The author is always the authenticated user; clients
+cannot choose or change it. Any active member of the team can create, read,
+update, or permanently delete its notes.
+
+Example team, membership, and note CRUD requests. Replace the sample IDs with
+IDs returned by the create requests:
 
 ```bash
+# Create a team; the authenticated user becomes its owner.
 curl -X POST http://127.0.0.1:8000/teams \
   -H "Authorization: Bearer $ACCESS_TOKEN" \
   -H 'Content-Type: application/json' \
   -d '{"name":"Product Team"}'
 
+# List active teams that the authenticated user belongs to.
 curl http://127.0.0.1:8000/teams \
   -H "Authorization: Bearer $ACCESS_TOKEN"
 
+# Add an existing user to the team as a member.
 curl -X POST http://127.0.0.1:8000/teams/1/members \
   -H "Authorization: Bearer $ACCESS_TOKEN" \
   -H 'Content-Type: application/json' \
   -d '{"email":"colleague@example.com"}'
 
+# List the team's active members.
 curl http://127.0.0.1:8000/teams/1/members \
   -H "Authorization: Bearer $ACCESS_TOKEN"
 
+# Create a note in the team.
 curl -X POST http://127.0.0.1:8000/teams/1/notes \
   -H "Authorization: Bearer $ACCESS_TOKEN" \
   -H 'Content-Type: application/json' \
   -d '{"title":"Planning","content":"Discuss launch timeline."}'
 
+# List the team's notes, newest first, using the first page.
 curl 'http://127.0.0.1:8000/teams/1/notes?limit=20&offset=0' \
   -H "Authorization: Bearer $ACCESS_TOKEN"
 
+# Retrieve a specific note in the team.
 curl http://127.0.0.1:8000/teams/1/notes/1 \
   -H "Authorization: Bearer $ACCESS_TOKEN"
 
+# Update the note's title; its content remains unchanged.
 curl -X PATCH http://127.0.0.1:8000/teams/1/notes/1 \
   -H "Authorization: Bearer $ACCESS_TOKEN" \
   -H 'Content-Type: application/json' \
   -d '{"title":"Updated planning"}'
 
+# Permanently delete the note.
 curl -X DELETE http://127.0.0.1:8000/teams/1/notes/1 \
   -H "Authorization: Bearer $ACCESS_TOKEN"
 ```
@@ -125,14 +142,19 @@ Note authorship is always taken from the access token, not request data. Only
 active team members can create, list, retrieve, update, or delete notes;
 non-members receive `403 Forbidden`, and missing or soft-deleted teams receive
 `404 Not Found`.
-Retrieving a note outside the specified team or a nonexistent note returns
-`404 Not Found`. Updates accept one or both of `title` and `content`; omitted
+Notes that do not exist in the specified team return `404 Not Found`. Updates
+accept one or both of `title` and `content`; omitted
 fields remain unchanged, and empty patches or null/invalid values return
 `422 Unprocessable Entity`. Note deletion is permanent and returns
 `204 No Content`.
 Note listing defaults to 20 results and supports `limit` values from 1 to 100
 and non-negative `offset` values. Results are ordered by creation time
 descending, with note ID descending as a stable tie-breaker.
+Use the team ID returned by team creation and the note ID returned by note
+creation in the note URLs shown above. Note titles must be nonblank and no
+longer than 200 characters; content must be nonempty. Successful note creation
+returns `201 Created`, reads and updates return `200 OK`, and permanent deletion
+returns `204 No Content`.
 
 Registration returns `409 Conflict` for an existing email; malformed input
 returns `422 Unprocessable Entity`. Invalid login/token requests return
@@ -141,23 +163,24 @@ returns `422 Unprocessable Entity`. Invalid login/token requests return
 
 ## Design choices
 
+These were the three choices that most shaped the MVP:
+
 - **SQLite and SQLAlchemy/Alembic:** SQLite keeps local setup lightweight, while
   SQLAlchemy models and versioned migrations make the schema explicit and
   support a future move to a server database.
 - **Argon2 password hashes and short-lived JWTs:** passwords are never stored
   in plaintext, and bearer tokens expire after 30 minutes by default. Token
   signing uses a required environment secret rather than a committed key.
-- **Soft deletion and team-scoped authorization:** deleted users and teams are
-  marked rather than immediately erased, preserving note authorship and team
-  data. Membership checks restrict team information to owners or members as
-  appropriate.
+- **Deletion and team-scoped authorization:** users and teams are soft-deleted
+  to preserve history and note authorship, while note deletion is permanent for
+  the MVP. Membership checks constrain note access and owner-only membership
+  management to the relevant team.
 
 ## If I had more time
 
-I would add invitation and account-recovery flows and exercise the migration
-path against PostgreSQL. I would also define an explicit
-retention/anonymization policy for soft-deleted accounts and teams before
-implementing permanent data purging.
+With more time, I would add invitation and account-recovery flows, exercise the
+migration path against PostgreSQL, and define a retention/anonymization policy
+for soft-deleted accounts and teams before implementing permanent data purging.
 
 ## Tests
 
