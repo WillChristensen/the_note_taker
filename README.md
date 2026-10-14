@@ -1,8 +1,8 @@
 # the_note_taker
 
-A REST API for capturing and sharing notes with small teams. This initial
-foundation provides a health check; note, team, and authentication features
-will be added in subsequent steps.
+A REST API for capturing and sharing notes with small teams. The service
+currently provides a health check and the initial database setup; note, team,
+and authentication features will be added in subsequent steps.
 
 ## Requirements
 
@@ -26,6 +26,13 @@ uvicorn app.main:app --reload
 The API is available at <http://127.0.0.1:8000>. Interactive API documentation
 is available at <http://127.0.0.1:8000/docs>.
 
+## Database
+
+The default database is SQLite at `./note_taker.db`. Set the `DATABASE_URL`
+environment variable to use a different SQLAlchemy database URL. The database
+connection and session helpers are available for application use; schema
+migrations and models will be added in subsequent steps.
+
 ## Health check
 
 ```bash
@@ -43,4 +50,3 @@ Expected response:
 ```bash
 python -m pytest
 ```
-
