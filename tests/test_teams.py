@@ -871,3 +871,137 @@ def test_update_note_returns_not_found_for_missing_or_deleted_team(
 
     assert deleted_team.status_code == 404
     assert missing_team.status_code == 404
+
+
+def test_team_member_can_permanently_delete_note(team_client) -> None:
+    client, session_factory = team_client
+    owner_token = register_and_login(client, "owner@example.com")
+    member_token = register_and_login(client, "member@example.com")
+    team_id = client.post(
+        "/teams",
+        json={"name": "Notes team"},
+        headers={"Authorization": f"Bearer {owner_token}"},
+    ).json()["id"]
+    membership = client.post(
+        f"/teams/{team_id}/members",
+        json={"email": "member@example.com"},
+        headers={"Authorization": f"Bearer {owner_token}"},
+    )
+    assert membership.status_code == 201
+    note = client.post(
+        f"/teams/{team_id}/notes",
+        json={"title": "Temporary note", "content": "Delete me."},
+        headers={"Authorization": f"Bearer {owner_token}"},
+    )
+    assert note.status_code == 201
+    note_id = note.json()["id"]
+
+    deleted = client.delete(
+        f"/teams/{team_id}/notes/{note_id}",
+        headers={"Authorization": f"Bearer {member_token}"},
+    )
+
+    assert deleted.status_code == 204
+    assert deleted.content == b""
+    with session_factory() as session:
+        assert session.get(Note, note_id) is None
+    assert client.get(
+        f"/teams/{team_id}/notes/{note_id}",
+        headers={"Authorization": f"Bearer {owner_token}"},
+    ).status_code == 404
+    assert client.get(
+        f"/teams/{team_id}/notes",
+        headers={"Authorization": f"Bearer {owner_token}"},
+    ).json() == []
+
+
+def test_non_member_cannot_delete_team_note(team_client) -> None:
+    client, session_factory = team_client
+    owner_token = register_and_login(client, "owner@example.com")
+    outsider_token = register_and_login(client, "outsider@example.com")
+    team_id = client.post(
+        "/teams",
+        json={"name": "Private team"},
+        headers={"Authorization": f"Bearer {owner_token}"},
+    ).json()["id"]
+    note = client.post(
+        f"/teams/{team_id}/notes",
+        json={"title": "Private note", "content": "Keep this note."},
+        headers={"Authorization": f"Bearer {owner_token}"},
+    )
+    note_id = note.json()["id"]
+
+    response = client.delete(
+        f"/teams/{team_id}/notes/{note_id}",
+        headers={"Authorization": f"Bearer {outsider_token}"},
+    )
+
+    assert response.status_code == 403
+    assert response.json() == {"detail": "Team membership required"}
+    with session_factory() as session:
+        assert session.get(Note, note_id) is not None
+
+
+def test_delete_note_is_team_scoped_and_requires_authentication(team_client) -> None:
+    client, session_factory = team_client
+    owner_token = register_and_login(client, "owner@example.com")
+    first_team_id = client.post(
+        "/teams",
+        json={"name": "First team"},
+        headers={"Authorization": f"Bearer {owner_token}"},
+    ).json()["id"]
+    second_team_id = client.post(
+        "/teams",
+        json={"name": "Second team"},
+        headers={"Authorization": f"Bearer {owner_token}"},
+    ).json()["id"]
+    note = client.post(
+        f"/teams/{second_team_id}/notes",
+        json={"title": "Scoped note", "content": "Remain unchanged."},
+        headers={"Authorization": f"Bearer {owner_token}"},
+    )
+    note_id = note.json()["id"]
+
+    wrong_team = client.delete(
+        f"/teams/{first_team_id}/notes/{note_id}",
+        headers={"Authorization": f"Bearer {owner_token}"},
+    )
+    missing_note = client.delete(
+        f"/teams/{first_team_id}/notes/9999",
+        headers={"Authorization": f"Bearer {owner_token}"},
+    )
+    unauthenticated = client.delete(
+        f"/teams/{second_team_id}/notes/{note_id}"
+    )
+
+    assert wrong_team.status_code == 404
+    assert wrong_team.json() == {"detail": "Note not found"}
+    assert missing_note.status_code == 404
+    assert missing_note.json() == {"detail": "Note not found"}
+    assert unauthenticated.status_code == 401
+    with session_factory() as session:
+        assert session.get(Note, note_id) is not None
+
+
+def test_delete_note_returns_not_found_for_missing_or_deleted_team(
+        team_client,
+) -> None:
+    client, session_factory = team_client
+    owner_token = register_and_login(client, "owner@example.com")
+    team_id = client.post(
+        "/teams",
+        json={"name": "Deleted team"},
+        headers={"Authorization": f"Bearer {owner_token}"},
+    ).json()["id"]
+    with session_factory() as session:
+        team = session.get(Team, team_id)
+        assert team is not None
+        team.deleted_at = datetime.now(UTC)
+        session.commit()
+
+    headers = {"Authorization": f"Bearer {owner_token}"}
+    deleted_team = client.delete(f"/teams/{team_id}/notes/1", headers=headers)
+    missing_team = client.delete("/teams/9999/notes/1", headers=headers)
+
+    assert deleted_team.status_code == 404
+    assert missing_team.status_code == 404

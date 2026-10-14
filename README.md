@@ -3,7 +3,7 @@
 A REST API foundation for capturing and sharing notes with small teams. The
 current API supports health checks, registration, login, team creation and
 listing, owner-managed team memberships, and note creation, listing, retrieval,
-and updates. Note deletion is not implemented yet.
+updates, and deletion.
 
 ## Requirements
 
@@ -80,6 +80,7 @@ export ACCESS_TOKEN='paste-access-token-here'
 | `GET` | `/teams/{team_id}/notes` | Team member | List team notes, newest first |
 | `GET` | `/teams/{team_id}/notes/{note_id}` | Team member | Retrieve a note in the team |
 | `PATCH` | `/teams/{team_id}/notes/{note_id}` | Team member | Update a note's title and/or content |
+| `DELETE` | `/teams/{team_id}/notes/{note_id}` | Team member | Permanently delete a note |
 
 Example team and membership requests:
 
@@ -115,15 +116,20 @@ curl -X PATCH http://127.0.0.1:8000/teams/1/notes/1 \
   -H "Authorization: Bearer $ACCESS_TOKEN" \
   -H 'Content-Type: application/json' \
   -d '{"title":"Updated planning"}'
+
+curl -X DELETE http://127.0.0.1:8000/teams/1/notes/1 \
+  -H "Authorization: Bearer $ACCESS_TOKEN"
 ```
 
 Note authorship is always taken from the access token, not request data. Only
-active team members can create, list, retrieve, or update notes; non-members
-receive `403 Forbidden`, and missing or soft-deleted teams receive `404 Not Found`.
+active team members can create, list, retrieve, update, or delete notes;
+non-members receive `403 Forbidden`, and missing or soft-deleted teams receive
+`404 Not Found`.
 Retrieving a note outside the specified team or a nonexistent note returns
 `404 Not Found`. Updates accept one or both of `title` and `content`; omitted
 fields remain unchanged, and empty patches or null/invalid values return
-`422 Unprocessable Entity`.
+`422 Unprocessable Entity`. Note deletion is permanent and returns
+`204 No Content`.
 Note listing defaults to 20 results and supports `limit` values from 1 to 100
 and non-negative `offset` values. Results are ordered by creation time
 descending, with note ID descending as a stable tie-breaker.
@@ -148,9 +154,8 @@ returns `422 Unprocessable Entity`. Invalid login/token requests return
 
 ## If I had more time
 
-I would implement note deletion with membership checks; add
-invitation and account-recovery flows; and exercise the migration path against
-PostgreSQL. I would also define an explicit
+I would add invitation and account-recovery flows and exercise the migration
+path against PostgreSQL. I would also define an explicit
 retention/anonymization policy for soft-deleted accounts and teams before
 implementing permanent data purging.
 

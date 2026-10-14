@@ -228,6 +228,50 @@ def update_team_note(
     return note
 
 
+@router.delete(
+    "/{team_id}/notes/{note_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+def delete_team_note(
+        team_id: int,
+        note_id: int,
+        current_user: User = Depends(get_current_user),
+        db: Session = Depends(get_db),
+) -> None:
+    team = db.scalar(
+        select(Team).where(Team.id == team_id, Team.deleted_at.is_(None))
+    )
+    if team is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Team not found",
+        )
+
+    membership_exists = db.scalar(
+        select(Membership.id).where(
+            Membership.team_id == team_id,
+            Membership.user_id == current_user.id,
+        )
+    )
+    if membership_exists is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Team membership required",
+        )
+
+    note = db.scalar(
+        select(Note).where(Note.id == note_id, Note.team_id == team_id)
+    )
+    if note is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Note not found",
+        )
+
+    db.delete(note)
+    db.commit()
+
+
 def require_active_owner(
         team_id: int,
         current_user: User,
