@@ -5,7 +5,9 @@ from sqlalchemy import (
     DateTime,
     Enum as SQLAlchemyEnum,
     ForeignKey,
+    Index,
     String,
+    Text,
     UniqueConstraint,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -27,6 +29,7 @@ class User(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
     )
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     teams_created: Mapped[list["Team"]] = relationship(
         back_populates="creator", foreign_keys="Team.created_by_user_id"
@@ -34,6 +37,7 @@ class User(Base):
     memberships: Mapped[list["Membership"]] = relationship(
         back_populates="user", cascade="all, delete-orphan", passive_deletes=True
     )
+    notes_written: Mapped[list["Note"]] = relationship(back_populates="author")
 
 
 class Team(Base):
@@ -47,6 +51,7 @@ class Team(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
     )
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     creator: Mapped[User] = relationship(
         back_populates="teams_created", foreign_keys=[created_by_user_id]
@@ -54,6 +59,7 @@ class Team(Base):
     memberships: Mapped[list["Membership"]] = relationship(
         back_populates="team", cascade="all, delete-orphan", passive_deletes=True
     )
+    notes: Mapped[list["Note"]] = relationship(back_populates="team")
 
 
 class Membership(Base):
@@ -86,3 +92,30 @@ class Membership(Base):
 
     team: Mapped[Team] = relationship(back_populates="memberships")
     user: Mapped[User] = relationship(back_populates="memberships")
+
+
+class Note(Base):
+    __tablename__ = "notes"
+    __table_args__ = (Index("ix_notes_team_created_at", "team_id", "created_at"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    team_id: Mapped[int] = mapped_column(
+        ForeignKey("teams.id", ondelete="RESTRICT"), nullable=False
+    )
+    author_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    )
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+    )
+
+    team: Mapped[Team] = relationship(back_populates="notes")
+    author: Mapped[User] = relationship(back_populates="notes_written")

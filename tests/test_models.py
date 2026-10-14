@@ -1,10 +1,12 @@
+from datetime import UTC, datetime
+
 import pytest
-from sqlalchemy import text
+from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 
 from app.database import Base, create_database_engine
-from app.models import Membership, Team, TeamRole, User
+from app.models import Membership, Note, Team, TeamRole, User
 
 
 @pytest.fixture
@@ -88,3 +90,65 @@ def test_membership_role_is_limited_to_supported_values(db_session) -> None:
             ),
             {"team_id": team.id, "user_id": user.id},
         )
+
+
+def test_notes_have_team_and_author_relationships_and_ordering_index(db_session) -> None:
+    user = User(email="author@example.com", password_hash="hash")
+    team = Team(name="Small team", creator=user)
+    older = Note(
+        team=team,
+        author=user,
+        title="Older note",
+        content="First",
+        created_at=datetime(2026, 1, 1, tzinfo=UTC),
+    )
+    newer = Note(
+        team=team,
+        author=user,
+        title="Newer note",
+        content="Second",
+        created_at=datetime(2026, 1, 2, tzinfo=UTC),
+    )
+    db_session.add_all([older, newer])
+    db_session.commit()
+
+    ordered_notes = db_session.scalars(
+        select(Note).where(Note.team_id == team.id).order_by(Note.created_at.desc())
+    ).all()
+    index_columns = {
+        tuple(column.name for column in index.columns) for index in Note.__table__.indexes
+    }
+
+    assert [note.title for note in ordered_notes] == ["Newer note", "Older note"]
+    assert ("team_id", "created_at") in index_columns
+    assert newer in team.notes
+    assert newer in user.notes_written
+    assert newer.updated_at is not None
+    original_updated_at = newer.updated_at
+    newer.title = "Edited note"
+    db_session.commit()
+    db_session.refresh(newer)
+    assert newer.updated_at > original_updated_at
+
+
+def test_soft_deleting_owner_and_team_preserves_notes(db_session) -> None:
+    user = User(email="owner@example.com", password_hash="hash")
+    team = Team(name="Small team", creator=user)
+    note = Note(team=team, author=user, title="Keep me", content="Note content")
+    db_session.add(note)
+    db_session.commit()
+
+    deleted_at = datetime.now(UTC)
+    user.deleted_at = deleted_at
+    team.deleted_at = deleted_at
+    db_session.commit()
+    db_session.expire_all()
+
+    stored_note = db_session.get(Note, note.id)
+    stored_user = db_session.get(User, user.id)
+    stored_team = db_session.get(Team, team.id)
+    assert stored_user is not None and stored_user.deleted_at is not None
+    assert stored_team is not None and stored_team.deleted_at is not None
+    assert stored_note is not None
+    assert stored_note.title == "Keep me"
+    assert stored_note.author.email == "owner@example.com"
