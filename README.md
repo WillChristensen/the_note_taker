@@ -1,8 +1,8 @@
 # the_note_taker
 
 A REST API for capturing and sharing notes with small teams. The service
-currently provides health and user registration endpoints, backed by a schema
-for users, teams, memberships, and notes.
+currently provides health, user registration, and team creation/listing
+endpoints, backed by a schema for users, teams, memberships, and notes.
 
 ## Requirements
 
@@ -87,6 +87,21 @@ The response contains a bearer access token and its lifetime in seconds. Send
 it as `Authorization: Bearer <token>` to authenticated endpoints. Tokens are
 signed with `AUTH_SECRET_KEY`; deleted users cannot log in or use existing
 tokens.
+
+## Teams
+
+Authenticated users can create teams; the creator is assigned the owner role
+automatically. Users can list only active teams they belong to.
+
+```bash
+curl -X POST http://127.0.0.1:8000/teams \
+  -H "Authorization: Bearer $ACCESS_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"Product Team"}'
+
+curl http://127.0.0.1:8000/teams \
+  -H "Authorization: Bearer $ACCESS_TOKEN"
+```
 
 ## Health check
 

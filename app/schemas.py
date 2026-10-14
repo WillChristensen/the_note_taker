@@ -27,3 +27,24 @@ class AccessToken(BaseModel):
     access_token: str
     token_type: str
     expires_in: int
+
+
+class TeamCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+
+    @field_validator("name")
+    @classmethod
+    def strip_name(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("Team name must not be blank")
+        return normalized
+
+
+class TeamRead(BaseModel):
+    id: int
+    name: str
+    created_by_user_id: int
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
