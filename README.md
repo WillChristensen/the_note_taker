@@ -43,6 +43,19 @@ alembic upgrade head
 Set `DATABASE_URL` to target a database other than the default SQLite file.
 The migration history is stored under `migrations/`.
 
+## Authentication configuration
+
+Authentication requires a secret key of at least 32 characters. Configure it
+in the environment before using authenticated endpoints:
+
+```bash
+export AUTH_SECRET_KEY="$(python -c 'import secrets; print(secrets.token_urlsafe(32))')"
+```
+
+Access tokens expire after 30 minutes by default. Set
+`AUTH_ACCESS_TOKEN_EXPIRE_MINUTES` to a positive integer to change the lifetime.
+Do not commit or reuse production secrets in source control.
+
 ## Health check
 
 ```bash
