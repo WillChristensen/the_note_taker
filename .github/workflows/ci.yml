@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.14"]
+    env:
+      AUTH_SECRET_KEY: ci-only-secret-key-that-is-long-enough
+      DATABASE_URL: sqlite:///${{ runner.temp }}/note_taker_ci.db
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install project and test dependencies
+        run: make setup PYTHON=python
+
+      - name: Run tests and apply migrations
+        run: make verify

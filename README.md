@@ -184,6 +184,10 @@ for soft-deleted accounts and teams before implementing permanent data purging.
 
 ## Tests
 
+GitHub Actions runs the full verification workflow on pushes and pull requests
+with Python 3.11 and 3.14. It installs the project, runs the test suite, and
+applies Alembic migrations to a fresh SQLite database.
+
 ```bash
 make test
 ```
