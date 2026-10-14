@@ -89,52 +89,60 @@ time, and update time. The author is always the authenticated user; clients
 cannot choose or change it. Any active member of the team can create, read,
 update, or permanently delete its notes.
 
-Example team, membership, and note CRUD requests. Replace the sample IDs with
-IDs returned by the create requests:
+Example team, membership, and note CRUD requests. These commands capture IDs
+from create responses so subsequent requests use the actual team and note IDs.
+Use an email address not already registered for the colleague example.
 
 ```bash
-# Create a team; the authenticated user becomes its owner.
-curl -X POST http://127.0.0.1:8000/teams \
+# Create a team; the authenticated user becomes its owner. Save the returned ID.
+TEAM_ID=$(curl -fsS -X POST http://127.0.0.1:8000/teams \
   -H "Authorization: Bearer $ACCESS_TOKEN" \
   -H 'Content-Type: application/json' \
-  -d '{"name":"Product Team"}'
+  -d '{"name":"Product Team"}' \
+  | python -c 'import json, sys; print(json.load(sys.stdin)["id"])')
 
 # List active teams that the authenticated user belongs to.
 curl http://127.0.0.1:8000/teams \
   -H "Authorization: Bearer $ACCESS_TOKEN"
 
+# Register the colleague first so the owner can add this existing user.
+curl -X POST http://127.0.0.1:8000/auth/register \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"colleague@example.com","password":"a secure password"}'
+
 # Add an existing user to the team as a member.
-curl -X POST http://127.0.0.1:8000/teams/1/members \
+curl -X POST "http://127.0.0.1:8000/teams/$TEAM_ID/members" \
   -H "Authorization: Bearer $ACCESS_TOKEN" \
   -H 'Content-Type: application/json' \
   -d '{"email":"colleague@example.com"}'
 
 # List the team's active members.
-curl http://127.0.0.1:8000/teams/1/members \
+curl "http://127.0.0.1:8000/teams/$TEAM_ID/members" \
   -H "Authorization: Bearer $ACCESS_TOKEN"
 
-# Create a note in the team.
-curl -X POST http://127.0.0.1:8000/teams/1/notes \
+# Create a note in the team. Save the returned ID for the remaining requests.
+NOTE_ID=$(curl -fsS -X POST "http://127.0.0.1:8000/teams/$TEAM_ID/notes" \
   -H "Authorization: Bearer $ACCESS_TOKEN" \
   -H 'Content-Type: application/json' \
-  -d '{"title":"Planning","content":"Discuss launch timeline."}'
+  -d '{"title":"Planning","content":"Discuss launch timeline."}' \
+  | python -c 'import json, sys; print(json.load(sys.stdin)["id"])')
 
 # List the team's notes, newest first, using the first page.
-curl 'http://127.0.0.1:8000/teams/1/notes?limit=20&offset=0' \
+curl "http://127.0.0.1:8000/teams/$TEAM_ID/notes?limit=20&offset=0" \
   -H "Authorization: Bearer $ACCESS_TOKEN"
 
 # Retrieve a specific note in the team.
-curl http://127.0.0.1:8000/teams/1/notes/1 \
+curl "http://127.0.0.1:8000/teams/$TEAM_ID/notes/$NOTE_ID" \
   -H "Authorization: Bearer $ACCESS_TOKEN"
 
 # Update the note's title; its content remains unchanged.
-curl -X PATCH http://127.0.0.1:8000/teams/1/notes/1 \
+curl -X PATCH "http://127.0.0.1:8000/teams/$TEAM_ID/notes/$NOTE_ID" \
   -H "Authorization: Bearer $ACCESS_TOKEN" \
   -H 'Content-Type: application/json' \
   -d '{"title":"Updated planning"}'
 
 # Permanently delete the note.
-curl -X DELETE http://127.0.0.1:8000/teams/1/notes/1 \
+curl -X DELETE "http://127.0.0.1:8000/teams/$TEAM_ID/notes/$NOTE_ID" \
   -H "Authorization: Bearer $ACCESS_TOKEN"
 ```
 
@@ -150,11 +158,11 @@ fields remain unchanged, and empty patches or null/invalid values return
 Note listing defaults to 20 results and supports `limit` values from 1 to 100
 and non-negative `offset` values. Results are ordered by creation time
 descending, with note ID descending as a stable tie-breaker.
-Use the team ID returned by team creation and the note ID returned by note
-creation in the note URLs shown above. Note titles must be nonblank and no
-longer than 200 characters; content must be nonempty. Successful note creation
-returns `201 Created`, reads and updates return `200 OK`, and permanent deletion
-returns `204 No Content`.
+The example commands capture the team ID returned by team creation and the note
+ID returned by note creation for use in later requests. Note titles must be
+nonblank and no longer than 200 characters; content must be nonempty. Successful
+note creation returns `201 Created`, reads and updates return `200 OK`, and
+permanent deletion returns `204 No Content`.
 
 Registration returns `409 Conflict` for an existing email; malformed input
 returns `422 Unprocessable Entity`. Invalid login/token requests return
