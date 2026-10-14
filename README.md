@@ -1,97 +1,82 @@
-# the_note_taker
+# The Note Taker
 
-A REST API for capturing and sharing notes with small teams. The service
-currently provides health, user registration, and team creation/listing
-endpoints, backed by a schema for users, teams, memberships, and notes.
+A REST API foundation for capturing and sharing notes with small teams. The
+current API supports health checks, registration, login, team creation and
+listing, and owner-managed team memberships. Note CRUD is not implemented yet.
 
 ## Requirements
 
 - Python 3.11 or newer
+- GNU Make
 
-## Set up locally
+## Set up and run
 
 ```bash
 make setup
-```
-
-## Verify the project
-
-```bash
+export AUTH_SECRET_KEY="$(.venv/bin/python -c 'import secrets; print(secrets.token_urlsafe(32))')"
 make verify
-```
-
-This runs the test suite, including migration upgrade/downgrade checks, then
-applies the latest migration to the configured database.
-
-## Run the service
-
-```bash
 make run
 ```
 
-This applies pending migrations and starts the development server. The API is
-available at <http://127.0.0.1:8000>; interactive documentation is at
+`make verify` runs the tests and applies the latest migration to the configured
+database. `make run` applies migrations and starts the development server at
+<http://127.0.0.1:8000>. Interactive API docs are available at
 <http://127.0.0.1:8000/docs>.
 
-## Database
+The commands use `.venv/bin/python`; set `PYTHON` when running `make setup` if
+you need a different Python interpreter.
 
-The default database is SQLite at `./note_taker.db`. Set the `DATABASE_URL`
-environment variable to use a different SQLAlchemy database URL. User, Team, Membership,
-and Note models define team creators, team roles (`owner` and `member`),
-team-scoped notes, and one membership per user/team pair. User and team
-deletion is represented by a `deleted_at` timestamp, so notes and authorship
-are retained. Apply database schema changes with:
+## Configuration and database
 
-```bash
-make db-upgrade
-```
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `DATABASE_URL` | `sqlite:///./note_taker.db` | SQLAlchemy database URL |
+| `AUTH_SECRET_KEY` | Required for login/token validation | JWT signing key, at least 32 characters |
+| `AUTH_ACCESS_TOKEN_EXPIRE_MINUTES` | `30` | Positive token lifetime in minutes |
 
-Set `DATABASE_URL` to target a database other than the default SQLite file.
-The migration history is stored under `migrations/`.
+Keep secrets out of source control. The database schema is managed by Alembic
+under `migrations/`. Apply pending schema changes with `make db-upgrade`.
+SQLite is the default for a simple local setup; the URL can be configured for
+another SQLAlchemy-supported database.
 
-## Authentication configuration
+Users and teams are soft-deleted with a `deleted_at` timestamp. This preserves
+notes and authorship; deleted users cannot log in or use existing tokens.
 
-Authentication requires a secret key of at least 32 characters. Configure it
-in the environment before using authenticated endpoints:
+## API
 
-```bash
-export AUTH_SECRET_KEY="$(python -c 'import secrets; print(secrets.token_urlsafe(32))')"
-```
-
-Access tokens expire after 30 minutes by default. Set
-`AUTH_ACCESS_TOKEN_EXPIRE_MINUTES` to a positive integer to change the lifetime.
-Do not commit or reuse production secrets in source control.
-
-Register a user with:
+The public endpoints are `GET /health`, `POST /auth/register`, and
+`POST /auth/token`. All other endpoints require a bearer access token. To
+authenticate, register, then log in using the email in the OAuth2 `username`
+field:
 
 ```bash
 curl -X POST http://127.0.0.1:8000/auth/register \
   -H 'Content-Type: application/json' \
   -d '{"email":"person@example.com","password":"a secure password"}'
-```
 
-The API returns the new user's ID, normalized email, and creation timestamp.
-Passwords must contain 8–128 characters and are stored as Argon2 hashes.
-Registering an email address that is already in use returns `409 Conflict`;
-invalid request data returns `422 Unprocessable Entity`.
-
-Log in with an OAuth2 password-form request (use the email as `username`):
-
-```bash
 curl -X POST http://127.0.0.1:8000/auth/token \
   -H 'Content-Type: application/x-www-form-urlencoded' \
-  -d 'username=person%40example.com&password=a+secure+password'
+  --data-urlencode 'username=person@example.com' \
+  --data-urlencode 'password=a secure password'
 ```
 
-The response contains a bearer access token and its lifetime in seconds. Send
-it as `Authorization: Bearer <token>` to authenticated endpoints. Tokens are
-signed with `AUTH_SECRET_KEY`; deleted users cannot log in or use existing
-tokens.
+Copy `access_token` from the login response and set it in your shell:
 
-## Teams
+```bash
+export ACCESS_TOKEN='paste-access-token-here'
+```
 
-Authenticated users can create teams; the creator is assigned the owner role
-automatically. Users can list only active teams they belong to.
+| Method | Path | Access | Purpose |
+| --- | --- | --- | --- |
+| `GET` | `/health` | Public | Health check |
+| `POST` | `/auth/register` | Public | Register with a unique email and 8–128 character password |
+| `POST` | `/auth/token` | Public | Log in and receive a bearer token |
+| `POST` | `/teams` | Authenticated | Create a team; creator becomes its owner |
+| `GET` | `/teams` | Authenticated | List active teams the caller belongs to |
+| `GET` | `/teams/{team_id}/members` | Team owner | List active members of a team |
+| `POST` | `/teams/{team_id}/members` | Team owner | Add an existing active user by email as a member |
+
+Example team and membership requests:
 
 ```bash
 curl -X POST http://127.0.0.1:8000/teams \
@@ -101,12 +86,7 @@ curl -X POST http://127.0.0.1:8000/teams \
 
 curl http://127.0.0.1:8000/teams \
   -H "Authorization: Bearer $ACCESS_TOKEN"
-```
 
-Only team owners can list team membership or add an existing active user by
-email. Added users receive the `member` role:
-
-```bash
 curl -X POST http://127.0.0.1:8000/teams/1/members \
   -H "Authorization: Bearer $ACCESS_TOKEN" \
   -H 'Content-Type: application/json' \
@@ -116,20 +96,36 @@ curl http://127.0.0.1:8000/teams/1/members \
   -H "Authorization: Bearer $ACCESS_TOKEN"
 ```
 
-## Health check
+Registration returns `409 Conflict` for an existing email; malformed input
+returns `422 Unprocessable Entity`. Invalid login/token requests return
+`401 Unauthorized`. A non-owner attempting membership management receives
+`403 Forbidden`; unknown or deleted teams/users return `404 Not Found`.
 
-```bash
-curl http://127.0.0.1:8000/health
-```
+## Design choices
 
-Expected response:
+- **SQLite and SQLAlchemy/Alembic:** SQLite keeps local setup lightweight, while
+  SQLAlchemy models and versioned migrations make the schema explicit and
+  support a future move to a server database.
+- **Argon2 password hashes and short-lived JWTs:** passwords are never stored
+  in plaintext, and bearer tokens expire after 30 minutes by default. Token
+  signing uses a required environment secret rather than a committed key.
+- **Soft deletion and team-scoped authorization:** deleted users and teams are
+  marked rather than immediately erased, preserving note authorship and team
+  data. Membership checks restrict team information to owners or members as
+  appropriate.
 
-```json
-{"status": "ok"}
-```
+## If I had more time
 
-## Run tests only
+I would implement note CRUD with membership checks and pagination, add
+invitation and account-recovery flows, and exercise the migration path against
+PostgreSQL. I would also define an explicit retention/anonymization policy for
+soft-deleted accounts and teams before implementing permanent data purging.
+
+## Tests
 
 ```bash
 make test
 ```
+
+Tests use isolated temporary SQLite databases and cover authentication,
+authorization, model constraints, and migration upgrade/downgrade behavior.
