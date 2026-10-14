@@ -75,6 +75,19 @@ Passwords must contain 8–128 characters and are stored as Argon2 hashes.
 Registering an email address that is already in use returns `409 Conflict`;
 invalid request data returns `422 Unprocessable Entity`.
 
+Log in with an OAuth2 password-form request (use the email as `username`):
+
+```bash
+curl -X POST http://127.0.0.1:8000/auth/token \
+  -H 'Content-Type: application/x-www-form-urlencoded' \
+  -d 'username=person%40example.com&password=a+secure+password'
+```
+
+The response contains a bearer access token and its lifetime in seconds. Send
+it as `Authorization: Bearer <token>` to authenticated endpoints. Tokens are
+signed with `AUTH_SECRET_KEY`; deleted users cannot log in or use existing
+tokens.
+
 ## Health check
 
 ```bash
