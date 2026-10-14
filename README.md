@@ -29,9 +29,11 @@ is available at <http://127.0.0.1:8000/docs>.
 ## Database
 
 The default database is SQLite at `./note_taker.db`. Set the `DATABASE_URL`
-environment variable to use a different SQLAlchemy database URL. The initial
-User and Team models and database connection/session helpers are available;
-schema migrations and additional models will be added in subsequent steps.
+environment variable to use a different SQLAlchemy database URL. User, Team,
+and Membership models define team creators, team roles (`owner` and `member`),
+and one membership per user/team pair. Database connection/session helpers are
+available; schema migrations and additional models will be added in subsequent
+steps.
 
 ## Health check
 
