@@ -163,7 +163,8 @@ returns `422 Unprocessable Entity`. Invalid login/token requests return
 
 ## Design choices
 
-These were the three choices that most shaped the MVP:
+These are the three design choices I spent the most time considering, along
+with why I made them:
 
 - **SQLite and SQLAlchemy/Alembic:** SQLite keeps local setup lightweight, while
   SQLAlchemy models and versioned migrations make the schema explicit and
@@ -178,9 +179,19 @@ These were the three choices that most shaped the MVP:
 
 ## If I had more time
 
-With more time, I would add invitation and account-recovery flows, exercise the
-migration path against PostgreSQL, and define a retention/anonymization policy
-for soft-deleted accounts and teams before implementing permanent data purging.
+**Change:** Keep SQLite as the lightweight local default, but verify migrations
+and core behavior against PostgreSQL in CI before treating the service as
+production-ready.
+
+**Add:** Owner-managed team-member removal with safeguards such as preventing
+removal of the last owner; team-scoped note search across titles and content;
+and deployment basics including Docker, structured request/error logging, and
+a deployment guide.
+
+**Stop:** Treating permanent note deletion as the only deletion path. Before
+using the service for long-lived team records, define the retention policy and
+consider soft deletion or a recovery window, balancing recoverability with
+privacy and data-retention requirements.
 
 ## Tests
 
