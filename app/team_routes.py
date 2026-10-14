@@ -1,11 +1,12 @@
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.auth_dependencies import get_current_user
 from app.database import get_db
 from app.models import Membership, Team, TeamRole, User
-from app.schemas import TeamCreate, TeamRead
+from app.schemas import MemberAdd, MemberRead, TeamCreate, TeamRead
 
 router = APIRouter(prefix="/teams", tags=["teams"])
 
@@ -16,9 +17,9 @@ router = APIRouter(prefix="/teams", tags=["teams"])
     status_code=status.HTTP_201_CREATED,
 )
 def create_team(
-    team_data: TeamCreate,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+        team_data: TeamCreate,
+        current_user: User = Depends(get_current_user),
+        db: Session = Depends(get_db),
 ) -> Team:
     team = Team(name=team_data.name, creator=current_user)
     db.add(team)
@@ -37,8 +38,8 @@ def create_team(
 
 @router.get("", response_model=list[TeamRead])
 def list_teams(
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+        current_user: User = Depends(get_current_user),
+        db: Session = Depends(get_db),
 ) -> list[Team]:
     statement = (
         select(Team)
@@ -50,3 +51,119 @@ def list_teams(
         .order_by(Team.created_at.desc(), Team.id.desc())
     )
     return list(db.scalars(statement).all())
+
+
+def require_active_owner(
+        team_id: int,
+        current_user: User,
+        db: Session,
+) -> Team:
+    team = db.scalar(
+        select(Team).where(Team.id == team_id, Team.deleted_at.is_(None))
+    )
+    if team is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Team not found",
+        )
+
+    membership = db.scalar(
+        select(Membership).where(
+            Membership.team_id == team_id,
+            Membership.user_id == current_user.id,
+        )
+    )
+    if membership is None or membership.role is not TeamRole.OWNER:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only team owners can manage memberships",
+        )
+    return team
+
+
+@router.get("/{team_id}/members", response_model=list[MemberRead])
+def list_team_members(
+        team_id: int,
+        current_user: User = Depends(get_current_user),
+        db: Session = Depends(get_db),
+) -> list[MemberRead]:
+    require_active_owner(team_id, current_user, db)
+    rows = db.execute(
+        select(Membership.user_id, User.email, Membership.role, Membership.joined_at)
+        .join(User, User.id == Membership.user_id)
+        .where(
+            Membership.team_id == team_id,
+            User.deleted_at.is_(None),
+        )
+        .order_by(Membership.joined_at, Membership.id)
+    )
+    return [
+        MemberRead(
+            user_id=user_id,
+            email=email,
+            role=role.value,
+            joined_at=joined_at,
+        )
+        for user_id, email, role, joined_at in rows
+    ]
+
+
+@router.post(
+    "/{team_id}/members",
+    response_model=MemberRead,
+    status_code=status.HTTP_201_CREATED,
+)
+def add_team_member(
+        team_id: int,
+        member_data: MemberAdd,
+        current_user: User = Depends(get_current_user),
+        db: Session = Depends(get_db),
+) -> MemberRead:
+    team = require_active_owner(team_id, current_user, db)
+    email = str(member_data.email)
+    user = db.scalar(
+        select(User).where(User.email == email, User.deleted_at.is_(None))
+    )
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Active user not found",
+        )
+
+    existing_membership = db.scalar(
+        select(Membership).where(
+            Membership.team_id == team.id,
+            Membership.user_id == user.id,
+        )
+    )
+    if existing_membership is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="User is already a member of this team",
+        )
+
+    membership = Membership(team=team, user=user, role=TeamRole.MEMBER)
+    db.add(membership)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        existing_membership = db.scalar(
+            select(Membership.id).where(
+                Membership.team_id == team.id,
+                Membership.user_id == user.id,
+            )
+        )
+        if existing_membership is not None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="User is already a member of this team",
+            ) from None
+        raise
+    db.refresh(membership)
+    return MemberRead(
+        user_id=user.id,
+        email=user.email,
+        role=membership.role.value,
+        joined_at=membership.joined_at,
+    )

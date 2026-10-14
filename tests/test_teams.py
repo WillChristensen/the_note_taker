@@ -143,3 +143,167 @@ def test_create_team_rejects_invalid_name(team_client, name: str) -> None:
     )
 
     assert response.status_code == 422
+
+
+def test_owner_can_list_members_and_add_existing_user(team_client) -> None:
+    client, session_factory = team_client
+    owner_token = register_and_login(client, "owner@example.com")
+    member_token = register_and_login(client, "member@example.com")
+    team = client.post(
+        "/teams",
+        json={"name": "Shared team"},
+        headers={"Authorization": f"Bearer {owner_token}"},
+    )
+    team_id = team.json()["id"]
+
+    add_response = client.post(
+        f"/teams/{team_id}/members",
+        json={"email": " MEMBER@EXAMPLE.COM "},
+        headers={"Authorization": f"Bearer {owner_token}"},
+    )
+    list_response = client.get(
+        f"/teams/{team_id}/members",
+        headers={"Authorization": f"Bearer {owner_token}"},
+    )
+
+    assert add_response.status_code == 201
+    assert add_response.json()["email"] == "member@example.com"
+    assert add_response.json()["role"] == "member"
+    assert list_response.status_code == 200
+    assert {entry["email"] for entry in list_response.json()} == {
+        "owner@example.com",
+        "member@example.com",
+    }
+
+    member_teams = client.get(
+        "/teams", headers={"Authorization": f"Bearer {member_token}"}
+    )
+    assert [listed["id"] for listed in member_teams.json()] == [team_id]
+
+    with session_factory() as session:
+        membership = session.scalar(
+            select(Membership).where(
+                Membership.team_id == team_id,
+                Membership.user_id == 2,
+            )
+        )
+        assert membership is not None
+        assert membership.role is TeamRole.MEMBER
+
+
+def test_non_owner_cannot_manage_or_view_team_members(team_client) -> None:
+    client, _ = team_client
+    owner_token = register_and_login(client, "owner@example.com")
+    member_token = register_and_login(client, "member@example.com")
+    outsider_token = register_and_login(client, "outsider@example.com")
+    team_id = client.post(
+        "/teams",
+        json={"name": "Private team"},
+        headers={"Authorization": f"Bearer {owner_token}"},
+    ).json()["id"]
+    client.post(
+        f"/teams/{team_id}/members",
+        json={"email": "member@example.com"},
+        headers={"Authorization": f"Bearer {owner_token}"},
+    )
+
+    member_list = client.get(
+        f"/teams/{team_id}/members",
+        headers={"Authorization": f"Bearer {member_token}"},
+    )
+    outsider_list = client.get(
+        f"/teams/{team_id}/members",
+        headers={"Authorization": f"Bearer {outsider_token}"},
+    )
+    member_add = client.post(
+        f"/teams/{team_id}/members",
+        json={"email": "outsider@example.com"},
+        headers={"Authorization": f"Bearer {member_token}"},
+    )
+    outsider_add = client.post(
+        f"/teams/{team_id}/members",
+        json={"email": "outsider@example.com"},
+        headers={"Authorization": f"Bearer {outsider_token}"},
+    )
+
+    for response in (member_list, outsider_list, member_add, outsider_add):
+        assert response.status_code == 403
+
+
+@pytest.mark.parametrize(
+    ("email", "expected_status", "expected_detail"),
+    [
+        ("unknown@example.com", 404, "Active user not found"),
+        ("deleted@example.com", 404, "Active user not found"),
+        (
+                "member@example.com",
+                409,
+                "User is already a member of this team",
+        ),
+    ],
+)
+def test_owner_add_member_handles_missing_deleted_and_duplicate_users(
+        team_client, email, expected_status, expected_detail
+) -> None:
+    client, session_factory = team_client
+    owner_token = register_and_login(client, "owner@example.com")
+    register_and_login(client, "member@example.com")
+    deleted_registration = client.post(
+        "/auth/register",
+        json={"email": "deleted@example.com", "password": PASSWORD},
+    )
+    assert deleted_registration.status_code == 201
+    with session_factory() as session:
+        deleted_user = session.get(User, deleted_registration.json()["id"])
+        assert deleted_user is not None
+        deleted_user.deleted_at = datetime.now(UTC)
+        session.commit()
+    team_id = client.post(
+        "/teams",
+        json={"name": "Manage team"},
+        headers={"Authorization": f"Bearer {owner_token}"},
+    ).json()["id"]
+    if email == "member@example.com":
+        client.post(
+            f"/teams/{team_id}/members",
+            json={"email": email},
+            headers={"Authorization": f"Bearer {owner_token}"},
+        )
+
+    response = client.post(
+        f"/teams/{team_id}/members",
+        json={"email": email},
+        headers={"Authorization": f"Bearer {owner_token}"},
+    )
+
+    assert response.status_code == expected_status
+    assert response.json()["detail"] == expected_detail
+
+
+def test_deleted_team_cannot_list_or_add_members(team_client) -> None:
+    client, session_factory = team_client
+    owner_token = register_and_login(client, "owner@example.com")
+    register_and_login(client, "member@example.com")
+    team_id = client.post(
+        "/teams",
+        json={"name": "Deleted team"},
+        headers={"Authorization": f"Bearer {owner_token}"},
+    ).json()["id"]
+    with session_factory() as session:
+        team = session.get(Team, team_id)
+        assert team is not None
+        team.deleted_at = datetime.now(UTC)
+        session.commit()
+
+    list_response = client.get(
+        f"/teams/{team_id}/members",
+        headers={"Authorization": f"Bearer {owner_token}"},
+    )
+    add_response = client.post(
+        f"/teams/{team_id}/members",
+        json={"email": "member@example.com"},
+        headers={"Authorization": f"Bearer {owner_token}"},
+    )
+
+    assert list_response.status_code == 404
+    assert add_response.status_code == 404

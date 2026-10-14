@@ -48,3 +48,21 @@ class TeamRead(BaseModel):
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class MemberAdd(BaseModel):
+    email: EmailStr
+
+    @field_validator("email", mode="before")
+    @classmethod
+    def normalize_email(cls, value: object) -> object:
+        if isinstance(value, str):
+            return value.strip().casefold()
+        return value
+
+
+class MemberRead(BaseModel):
+    user_id: int
+    email: EmailStr
+    role: str
+    joined_at: datetime

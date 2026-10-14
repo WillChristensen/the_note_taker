@@ -103,6 +103,19 @@ curl http://127.0.0.1:8000/teams \
   -H "Authorization: Bearer $ACCESS_TOKEN"
 ```
 
+Only team owners can list team membership or add an existing active user by
+email. Added users receive the `member` role:
+
+```bash
+curl -X POST http://127.0.0.1:8000/teams/1/members \
+  -H "Authorization: Bearer $ACCESS_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"colleague@example.com"}'
+
+curl http://127.0.0.1:8000/teams/1/members \
+  -H "Authorization: Bearer $ACCESS_TOKEN"
+```
+
 ## Health check
 
 ```bash
